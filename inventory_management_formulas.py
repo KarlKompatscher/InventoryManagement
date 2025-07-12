@@ -1594,3 +1594,16 @@ def coefficient_of_correlation(data1, data2):
         Correlation coefficient
     """
     return np.corrcoef(data1, data2)[0, 1]
+
+def bullwhip_effect(orders_variance, demand_variance):
+    """
+    Calculate bullwhip effect ratio
+    
+    Parameters:
+        orders_variance: Variance of orders
+        demand_variance: Variance of demand
+    
+    Returns:
+        Bullwhip effect ratio
+    """
+    return orders_variance / demand_variance
