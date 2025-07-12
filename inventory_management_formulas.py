@@ -85,6 +85,44 @@ def eoq_price_break(D, S, i, price, q_min=0, q_max=float("inf")):
     Q = max(q_min, min(Q, q_max))
     return Q
 
+def eoq_box_constrained(D, S, i, c, box_size):
+    """
+    EOQ with box size constraints (must be multiples of box_size)
+    
+    Parameters:
+        D: Annual demand
+        S: Fixed ordering cost
+        i: Interest rate (for holding cost)
+        c: Unit cost
+        box_size: Box size (order must be multiples of this)
+    
+    Returns:
+        Optimal order quantity (multiple of box_size)
+    """
+    # Step 1: Compute EOQ without constraints
+    h = i * c
+    Q_eoq = math.sqrt((2 * D * S) / h)
+    
+    # Step 2: Find multiples of box_size around EOQ
+    lower_multiple = box_size * math.floor(Q_eoq / box_size)
+    upper_multiple = box_size * math.ceil(Q_eoq / box_size)
+    
+    # Step 3: Calculate total cost for both candidates
+    def calculate_total_cost(Q):
+        purchase = D * c
+        ordering = S * (D / Q)
+        holding = h * (Q / 2)
+        return purchase + ordering + holding
+    
+    cost_lower = calculate_total_cost(lower_multiple)
+    cost_upper = calculate_total_cost(upper_multiple)
+    
+    # Step 4: Choose optimal order quantity
+    if cost_lower <= cost_upper:
+        return lower_multiple, cost_lower
+    else:
+        return upper_multiple, cost_upper
+
 def all_unit_quantity_discount(d, A, r, bp, cp):
     """
     All-unit quantity discount model
@@ -1113,6 +1151,40 @@ def xyz_classification(sales):
     else:
         return "Z"  # High variability
 
+def extended_xyz_classification(sales):
+    """
+    Extended XYZ classification with detailed information
+    
+    Parameters:
+        sales: Array of sales data
+    
+    Returns:
+        Dictionary with classification details
+    """
+    total_sales = np.sum(sales)
+    if total_sales == 0:
+        return {"classification": "Z", "cv": float('inf')}
+    
+    # Calculate coefficient of variation (CV)
+    mean_sales = np.mean(sales)
+    std_sales = np.std(sales)
+    cv = std_sales / mean_sales if mean_sales != 0 else float('inf')
+    
+    # Classify based on CV thresholds
+    if cv <= 0.5:
+        classification = "X"  # Very stable demand
+    elif cv < 1.25:
+        classification = "Y"  # Moderate variability
+    else:
+        classification = "Z"  # High variability
+    
+    return {
+        "classification": classification,
+        "cv": cv,
+        "mean": mean_sales,
+        "std": std_sales
+    }
+
 def sample_variance(data):
     """
     Calculate sample variance
@@ -1462,6 +1534,54 @@ def risk_pooling_benefit(demand_means, demand_stds, correlation_matrix, service_
         "relative_benefit": relative_benefit
     }
 
+def risk_pooling_correlation(mu_A, sigma_A, mu_B, sigma_B, rho, p, c, g=0):
+    """
+    Calculate risk pooling with correlation coefficient
+    
+    Parameters:
+        mu_A: Mean demand for product A
+        sigma_A: Standard deviation for product A
+        mu_B: Mean demand for product B
+        sigma_B: Standard deviation for product B
+        rho: Correlation coefficient between A and B
+        p: Selling price
+        c: Cost per unit
+        g: Salvage value (default 0)
+    
+    Returns:
+        Dictionary with individual and joint order quantities
+    """
+    # Critical ratio and z-score
+    CR = (p - c) / (p - g)
+    z_CR = norm.ppf(CR)
+    
+    # Individual order quantities
+    Q_A = mu_A + z_CR * sigma_A
+    Q_B = mu_B + z_CR * sigma_B
+    
+    # Joint demand parameters
+    mu_joint = mu_A + mu_B
+    sigma_joint = math.sqrt(sigma_A**2 + sigma_B**2 + 2 * rho * sigma_A * sigma_B)
+    
+    # Joint order quantity
+    Q_joint = mu_joint + z_CR * sigma_joint
+    
+    # Calculate effect of correlation
+    effect = (Q_A + Q_B) - Q_joint
+    
+    return {
+        "Q_A": Q_A,
+        "Q_B": Q_B,
+        "sum_individual": Q_A + Q_B,
+        "mu_joint": mu_joint,
+        "sigma_joint": sigma_joint,
+        "Q_joint": Q_joint,
+        "effect": effect,
+        "CV_A": sigma_A / mu_A,
+        "CV_B": sigma_B / mu_B,
+        "CV_joint": sigma_joint / mu_joint
+    }
+
 def coefficient_of_correlation(data1, data2):
     """
     Calculate coefficient of correlation between two datasets
@@ -1474,4 +1594,3 @@ def coefficient_of_correlation(data1, data2):
         Correlation coefficient
     """
     return np.corrcoef(data1, data2)[0, 1]
-"""
