@@ -10,8 +10,6 @@ import numpy as np
 from scipy.stats import norm, poisson, gamma, uniform
 from scipy.optimize import minimize_scalar, fsolve, root
 from scipy import integrate
-from scipy.integrate import quad
-import matplotlib.pyplot as plt
 import pandas as pd
 
 
