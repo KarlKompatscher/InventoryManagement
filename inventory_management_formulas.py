@@ -13,23 +13,143 @@ from scipy.integrate import quad
 import matplotlib.pyplot as plt
 import pandas as pd
 
+
+def log(label, value, unit=""):
+    """
+    Simple logging utility for labeled output.
+
+    Parameters:
+        label: Description of the value
+        value: Value to display
+        unit: Optional unit for formatting
+    """
+    print(f"[INFO] {label}: {round(value, 2)} {unit}")
+
+    
+
 #####################################################
 # Basic EOQ Models
 #####################################################
 
-def eoq(D, S, h):
+def eoq(D, S, h, label="EOQ"):
     """
     Economic Order Quantity (EOQ) - Basic formula
-    
+
     Parameters:
         D: Annual demand
         S: Fixed ordering cost
         h: Holding cost per unit per year
+        label: Optional label for logging output (default: "EOQ")
+
+    Returns:
+        EOQ value
+    """
+    EOQ = math.sqrt((2 * D * S) / h)
+    log(label, EOQ, unit="units")
+    return EOQ
+
+
+def total_relevant_cost_for_eoq(D, S, h, label="TRC"):
+    """
+    Total Relevant Cost (TRC) at EOQ — the minimum total cost per year.
+    
+    Parameters:
+        D: Annual demand
+        S: Fixed ordering/setup cost
+        h: Holding cost per unit per year
     
     Returns:
-        Economic order quantity
+        Total relevant cost (TRC) — ordering + holding cost at EOQ
     """
-    return math.sqrt((2 * D * S) / h)
+    EOQ = math.sqrt((2 * D * S) / h)
+    log(label, EOQ, unit="units")
+    return EOQ
+
+
+def cycle_length(eoq, d):
+    """
+    Cycle length between orders
+
+    Parameters:
+        eoq: Economic Order Quantity
+        d: Demand per period
+
+    Returns:
+        T: Cycle time (periods between orders)
+    """
+    return eoq / d
+
+
+def lot_cost(d, A, h, q):
+    """
+    Total cost per period for a given order quantity
+
+    Parameters:
+        d: Demand per period
+        A: Setup cost per order
+        h: Holding cost per unit
+        q: Order quantity
+
+    Returns:
+        Total cost per period
+    """
+    return d / q * A + 0.5 * h * q
+
+
+def cost_penalty(q, eoq):
+    """
+    Percentage Cost Penalty (PCP) for ordering quantity deviating from EOQ
+
+    Parameters:
+        q: Actual order quantity
+        eoq: Economic Order Quantity
+
+    Returns:
+        PCP: Percentage cost penalty
+    """
+    p = (q - eoq) / eoq
+    return 50 * (p**2 / (1 + p))
+
+
+def percentage_deviation(q, eoq):
+    """
+    Percentage deviation of order quantity from EOQ
+
+    Parameters:
+        q: Actual order quantity
+        eoq: Economic Order Quantity
+
+    Returns:
+        Deviation in %
+    """
+    return 100 * (q - eoq) / eoq
+
+
+def optimal_power_of_two_cycle(d, A, h):
+    """
+    Find optimal cycle time (as a power of two) that minimizes cost
+
+    Parameters:
+        d: Demand per period
+        A: Setup cost per order
+        h: Holding cost per unit
+
+    Returns:
+        t: Optimal cycle multiplier (power of 2)
+        cost_error: Percentage error vs. EOQ cost
+    """
+    def cost(q):
+        return lot_cost(d, A, h, q)
+    
+    t = 1
+    while cost(2 * d * t) < cost(d * t):
+        t *= 2
+    
+    TRC = total_relevant_cost_for_eoq(d, A, h)
+    error = 100 * (cost(d * t) / TRC - 1)
+    
+    return t, round(error, 2)
+
 
 def total_annual_cost(D, S, h, Q, price=0):
     """
@@ -49,21 +169,6 @@ def total_annual_cost(D, S, h, Q, price=0):
     ordering_cost = S * (D / Q)
     holding_cost = h * (Q / 2)
     return purchase_cost + ordering_cost + holding_cost
-
-def lot_cost(d, A, holding_cost, q):
-    """
-    Lot cost calculation
-    
-    Parameters:
-        d: Demand
-        A: Setup cost
-        holding_cost: Holding cost per unit
-        q: Order quantity
-    
-    Returns:
-        Lot cost
-    """
-    return d / q * A + 0.5 * holding_cost * q
 
 def eoq_price_break(D, S, i, price, q_min=0, q_max=float("inf")):
     """
