@@ -10,6 +10,7 @@ import numpy as np
 from scipy.stats import norm, poisson, gamma, uniform
 from scipy.optimize import minimize_scalar, fsolve, root
 from scipy import integrate
+from scipy.integrate import quad
 import pandas as pd
 
 
@@ -1026,8 +1027,6 @@ def croston_method(indices, values, alpha=0.2, label="Croston's method", suffix=
     log("Demand values", values, suffix=suffix)
     log("Alpha", alpha, suffix=suffix)
     
-    results = []
-    
     for i in range(len(values)):
         if i == 0:
             x = np.array([indices[i]])  # Interval
@@ -1415,14 +1414,14 @@ def serial_system_echelon_stock(inventory_positions, net_requirements, label="Ec
     
     return echelon_positions
 
-def guaranteed_service_model(lead_times, holding_costs, mean, std, service_level, candidates=None):
+def guaranteed_service_model(lead_times, holding_costs, demand_mean, std, service_level, candidates=None):
     """
     Guaranteed Service Model for multi-echelon inventory optimization
     
     Parameters:
         lead_times: List of lead times
         holding_costs: List of holding costs
-        mean: Mean demand
+        demand_mean: Mean demand
         std: Standard deviation of demand
         service_level: Service level
         candidates: Array of allocation candidates (optional)
