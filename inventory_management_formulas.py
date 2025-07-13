@@ -8,7 +8,7 @@ consolidated from various exercises and examples. Use this as a reference for ex
 import math
 import numpy as np
 from scipy.stats import norm, poisson, gamma, uniform
-from scipy.optimize import minimize_scalar, fsolve, root
+from scipy.optimize import minimize_scalar, fsolve, root, brentq
 from scipy import integrate
 from scipy.integrate import quad
 import pandas as pd
@@ -587,53 +587,6 @@ def newsvendor_gamma(mean, std, beta, label="Newsvendor Gamma", suffix=""):
     return Q
 
 
-def newsvendor_kpi(q, mu, sigma, p, c, g=0, label="Newsvendor KPI", suffix=""):
-    """
-    Calculate key performance indicators for newsvendor model
-
-    Parameters:
-        q: Order quantity
-        mu: Mean demand
-        sigma: Standard deviation of demand
-        p: Selling price
-        c: Cost per unit
-        g: Salvage value (default 0)
-        label: Optional label for logging output (default: "Newsvendor KPI")
-        suffix: Optional suffix to differentiate scenarios (A/B, 1/2, etc.)
-
-    Returns:
-        Dictionary with KPIs
-    """
-    z = (q - mu) / sigma  # Standard normal distribution
-    ELS = sigma * (norm.pdf(z) - z * (1 - norm.cdf(z)))  # Expected lost sales
-    ES = mu - ELS  # Expected sales
-    ELO = q - ES  # Expected leftover
-    EP = -c * q + p * ES + g * ELO  # Expected profit
-    alpha = norm.cdf(z)  # Service level (availability)
-    fill_rate = ES / mu  # Service level (fill rate)
-
-    log(f"{label} (order quantity)", q, unit="units", suffix=suffix)
-    log(f"{label} (mean demand)", mu, suffix=suffix)
-    log(f"{label} (standard deviation)", sigma, suffix=suffix)
-    log(f"{label} (z-value)", z, suffix=suffix)
-    log(f"{label} (expected lost sales)", ELS, unit="units", suffix=suffix)
-    log(f"{label} (expected sales)", ES, unit="units", suffix=suffix)
-    log(f"{label} (expected leftover)", ELO, unit="units", suffix=suffix)
-    log(f"{label} (expected profit)", EP, suffix=suffix)
-    log(f"{label} (availability)", alpha, suffix=suffix)
-    log(f"{label} (fill rate)", fill_rate, suffix=suffix)
-
-    return {
-        "z": z,
-        "Expected Lost Sales": ELS,
-        "Expected Sales": ES,
-        "Expected Leftover": ELO,
-        "Expected Profit": EP,
-        "Service Level (Availability)": alpha,
-        "Service Level (Fill Rate)": fill_rate,
-    }
-
-
 def newsvendor_general(label, distr, params, p, c, g=0):
     """
     Generalized newsvendor solution for different demand distributions
@@ -779,6 +732,38 @@ def newsvendor_find_z_for_fillrate(beta, mu, sigma, label="Z for fill rate", suf
     log(label, z, suffix=suffix)
 
     return z
+
+def G(z):
+    return norm.pdf(z) - z * (1 - norm.cdf(z))
+
+def inverse_G(G_target, min=-1000, max=1000):
+    return brentq(lambda z: G(z) - G_target, min, max)
+
+def inverse_cdf(p):
+    """
+    Inverse of the standard normal CDF (probit function).
+    
+    Parameters:
+        p: Probability value in (0, 1), like Phi or CR
+    
+    Returns:
+        z such that Φ(z) = p
+    """
+    return norm.ppf(p)
+
+def inverse_pdf(y, min=0, max=1000):
+    """
+    Inverse of the standard normal PDF.
+    Finds z ≥ 0 such that φ(z) = y.
+    
+    Parameters:
+        y: PDF value in (0, 1/√(2π)]
+    
+    Returns:
+        z ≥ 0 such that φ(z) = y
+    """
+    return brentq(lambda z: norm.pdf(z) - y, min, max)
+
 
 
 #####################################################
@@ -2596,3 +2581,8 @@ def compare_scenarios(
     log(f"{label} percentage difference", perc_diff, unit="%")
 
     return abs_diff, perc_diff
+
+
+#####################################################
+# Heuristic Models
+#####################################################
