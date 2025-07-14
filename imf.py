@@ -4520,6 +4520,111 @@ def compare_scenarios(
 
 
 #####################################################
+# Statistical Estimation Methods
+#####################################################
+
+
+def sample_mean(data, label="Sample mean", suffix=""):
+    """
+    Calculate sample mean estimator: μ = (1/T) * sum(dt) from t=1 to T
+    
+    Parameters:
+        data: Array of data points
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Sample mean
+    """
+    mean = np.mean(data)
+    log(label, mean, suffix=suffix)
+    return mean
+
+
+def sample_std_dev(data, label="Sample standard deviation", suffix=""):
+    """
+    Calculate sample standard deviation estimator: 
+    σ = sqrt((1/(T-1)) * sum((dt - μ)^2))
+    
+    Parameters:
+        data: Array of data points
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Sample standard deviation
+    """
+    std_dev = np.std(data, ddof=1)  # ddof=1 for sample standard deviation
+    log(label, std_dev, suffix=suffix)
+    return std_dev
+
+
+def estimate_gamma_params(data, label="Gamma parameters", suffix=""):
+    """
+    Estimate gamma distribution parameters:
+    α = μ^2/σ^2, β = σ^2/μ
+    
+    Parameters:
+        data: Array of data points
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with alpha (shape) and beta (scale) parameters
+    """
+    mu = sample_mean(data, label=f"{label} (mean)", suffix=suffix)
+    sigma = sample_std_dev(data, label=f"{label} (std dev)", suffix=suffix)
+    
+    alpha = mu**2 / sigma**2  # Shape parameter
+    beta = sigma**2 / mu      # Scale parameter
+    
+    log(f"{label} (alpha)", alpha, suffix=suffix)
+    log(f"{label} (beta)", beta, suffix=suffix)
+    
+    return {"alpha": alpha, "beta": beta}
+
+
+def compound_poisson_estimators(data, T, label="Compound Poisson", suffix=""):
+    """
+    Estimate parameters for compound Poisson distribution:
+    λ = -ln(n0/T), μc = μ/λ
+    
+    Parameters:
+        data: Array of observed demand values (can contain zeros)
+        T: Total number of time periods observed
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with lambda (arrival rate) and mu_c (individual demand size mean)
+    """
+    # Calculate n0 (number of periods with zero demand)
+    n0 = np.sum(np.array(data) == 0)
+    log(f"{label} (zero demand periods)", n0, suffix=suffix)
+    
+    # Calculate lambda (arrival rate)
+    if n0 == 0:
+        lam = T  # Maximum likelihood value when n0=0
+    elif n0 == T:
+        lam = 0.01  # Minimum value when all periods have zero demand
+    else:
+        lam = -math.log(n0/T)
+    log(f"{label} (lambda)", lam, suffix=suffix)
+    
+    # Calculate overall mean
+    mu = sample_mean(data, label=f"{label} (overall mean)", suffix=suffix)
+    
+    # Calculate mu_c (mean individual demand size)
+    if lam == 0:
+        mu_c = 0  # No arrivals
+    else:
+        mu_c = mu / lam
+    log(f"{label} (mu_c)", mu_c, suffix=suffix)
+    
+    return {"lambda": lam, "mu_c": mu_c}
+
+
+#####################################################
 # Regression Methods
 #####################################################
 
