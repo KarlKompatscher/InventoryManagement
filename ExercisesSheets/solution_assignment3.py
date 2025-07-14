@@ -6,6 +6,11 @@ Using the imf_* formula library
 
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
+import os
+
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from imf_main import (
     newsvendor_critical_ratio,
     newsvendor_normal,

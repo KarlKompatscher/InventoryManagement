@@ -5,6 +5,12 @@ Solution for Assignment 5: Multi-period Lot-sizing Problem
 
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
+import os
+
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 try:
     import gurobipy as gp
     from gurobipy import GRB, quicksum

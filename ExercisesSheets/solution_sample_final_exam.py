@@ -7,7 +7,12 @@ Using the imf_* formula library
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
+import os
 from scipy.stats import norm, poisson
+
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from imf_main import (
     # EOQ functions
     eoq, eoq_all_unit_quantity_discount,

@@ -7,6 +7,11 @@ Using the imf_* formula library
 import math
 import matplotlib.pyplot as plt
 import numpy as np
+import sys
+import os
+
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from imf_main import EOQ, eoq, cost_penalty
 
 
