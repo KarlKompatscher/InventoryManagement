@@ -507,6 +507,159 @@ def newsvendor_critical_fractile(co, cu, label="Critical fractile", suffix=""):
     return critical_fractile
 
 
+def newsvendor_revenue_discrete(y, demand_values, demand_probs, p, g, c, label="Revenue function (discrete)", suffix=""):
+    """
+    Revenue function for newsvendor model with discrete demand distribution
+    
+    Parameters:
+        y: Order quantity
+        demand_values: Possible demand values
+        demand_probs: Probability of each demand value
+        p: Selling price
+        g: Salvage value
+        c: Procurement cost
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Expected profit/revenue
+    """
+    log("Order quantity", y, suffix=suffix)
+    log("Selling price", p, suffix=suffix)
+    log("Salvage value", g, suffix=suffix)
+    log("Procurement cost", c, suffix=suffix)
+    
+    # Procurement cost
+    revenue = -c * y
+    
+    # Revenue from demand <= order quantity (sell demand, salvage remainder)
+    for d, prob in zip(demand_values, demand_probs):
+        if d <= y:
+            rev = (p * d + g * (y - d)) * prob
+            revenue += rev
+            log(f"{label} (d={d}, revenue contribution)", rev, suffix=suffix)
+    
+    # Revenue from demand > order quantity (sell everything, no salvage)
+    for d, prob in zip(demand_values, demand_probs):
+        if d > y:
+            rev = p * y * prob
+            revenue += rev
+            log(f"{label} (d={d}, revenue contribution)", rev, suffix=suffix)
+    
+    log(label, revenue, suffix=suffix)
+    return revenue
+
+
+def newsvendor_revenue_continuous(y, distribution, dist_params, p, g, c, label="Revenue function (continuous)", suffix=""):
+    """
+    Revenue function for newsvendor model with continuous demand distribution
+    
+    Parameters:
+        y: Order quantity
+        distribution: Distribution type ('normal', 'gamma', etc.)
+        dist_params: Dictionary of distribution parameters
+        p: Selling price
+        g: Salvage value
+        c: Procurement cost
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Expected profit/revenue
+    """
+    log("Order quantity", y, suffix=suffix)
+    log("Distribution", distribution, suffix=suffix)
+    log("Distribution parameters", dist_params, suffix=suffix)
+    log("Selling price", p, suffix=suffix)
+    log("Salvage value", g, suffix=suffix)
+    log("Procurement cost", c, suffix=suffix)
+    
+    # Procurement cost
+    revenue = -c * y
+    
+    if distribution == 'normal':
+        mu = dist_params['mu']
+        sigma = dist_params['sigma']
+        
+        # Standardize y
+        z = (y - mu) / sigma
+        
+        # Expected lost sales using loss function
+        els = sigma * G_z(z, label=f"{label} (loss function)", suffix=suffix)
+        
+        # Expected sales
+        es = mu - els
+        
+        # Expected leftover inventory
+        elo = y - es
+        
+        # Calculate revenue components
+        revenue_sold = p * es
+        revenue_salvage = g * elo
+        
+        revenue += revenue_sold + revenue_salvage
+        
+        log(f"{label} (expected lost sales)", els, suffix=suffix)
+        log(f"{label} (expected sales)", es, suffix=suffix)
+        log(f"{label} (expected leftover)", elo, suffix=suffix)
+        log(f"{label} (revenue from sales)", revenue_sold, suffix=suffix)
+        log(f"{label} (revenue from salvage)", revenue_salvage, suffix=suffix)
+    
+    elif distribution == 'gamma':
+        # For gamma distribution, we need numerical integration
+        try:
+            from scipy.integrate import quad
+            
+            alpha = dist_params['alpha']
+            beta = dist_params['beta']  # scale parameter
+            
+            # Expected sales function to integrate
+            def expected_sales_integrand(d):
+                return d * gamma.pdf(d, a=alpha, scale=beta)
+            
+            # For d <= y
+            es_below_y, _ = quad(expected_sales_integrand, 0, y)
+            
+            # For d > y
+            excess_prob = 1 - gamma.cdf(y, a=alpha, scale=beta)
+            es_above_y = y * excess_prob
+            
+            # Total expected sales
+            es = es_below_y + es_above_y
+            
+            # Mean of the distribution
+            mu = alpha * beta
+            
+            # Expected lost sales
+            els = mu - es
+            
+            # Expected leftover inventory
+            elo = y - es
+            
+            # Calculate revenue components
+            revenue_sold = p * es
+            revenue_salvage = g * elo
+            
+            revenue += revenue_sold + revenue_salvage
+            
+            log(f"{label} (expected lost sales)", els, suffix=suffix)
+            log(f"{label} (expected sales)", es, suffix=suffix)
+            log(f"{label} (expected leftover)", elo, suffix=suffix)
+            log(f"{label} (revenue from sales)", revenue_sold, suffix=suffix)
+            log(f"{label} (revenue from salvage)", revenue_salvage, suffix=suffix)
+            
+        except ImportError:
+            log(f"{label} (error)", "SciPy integration not available", suffix=suffix)
+            revenue = None
+    
+    else:
+        log(f"{label} (error)", f"Distribution {distribution} not supported", suffix=suffix)
+        revenue = None
+    
+    log(label, revenue, suffix=suffix)
+    return revenue
+
+
 def newsvendor_with_costs(unit_cost, price, holding_cost, stockout_cost, 
                         demand_mean=None, demand_std=None, demand_distr=None, demand_probs=None,
                         label="Newsvendor with costs", suffix=""):
@@ -652,6 +805,67 @@ def newsvendor_normal(mu, sigma, CR, label="Order quantity", suffix=""):
     Q = mu + z * sigma
     log(label, Q, unit="units", suffix=suffix)
     return Q
+
+
+def newsvendor_with_estimated_params(sample_mean, sample_std, sample_size, p, c, g=0, 
+                                    confidence_level=0.95, label="Newsvendor with estimated parameters", suffix=""):
+    """
+    Newsvendor solution with estimated parameters using t-distribution
+    
+    This function calculates the optimal order quantity accounting for parameter uncertainty
+    when demand parameters are estimated from sample data.
+    
+    Parameters:
+        sample_mean: Sample mean of demand
+        sample_std: Sample standard deviation of demand
+        sample_size: Number of observations in sample
+        p: Selling price
+        c: Unit cost
+        g: Salvage value (default 0)
+        confidence_level: Confidence level (default 0.95)
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Optimal order quantity accounting for parameter uncertainty
+    """
+    from scipy.stats import t
+    
+    log("Sample mean", sample_mean, suffix=suffix)
+    log("Sample std dev", sample_std, suffix=suffix)
+    log("Sample size", sample_size, suffix=suffix)
+    log("Selling price", p, suffix=suffix)
+    log("Unit cost", c, suffix=suffix)
+    log("Salvage value", g, suffix=suffix)
+    log("Confidence level", confidence_level, suffix=suffix)
+    
+    # Calculate critical ratio
+    CR = newsvendor_critical_ratio(p, c, g, label=f"{label} (critical ratio)", suffix=suffix)
+    
+    # Get t-value for given confidence level and degrees of freedom
+    degrees_of_freedom = sample_size - 1
+    t_value = t.ppf(CR, df=degrees_of_freedom)
+    log(f"{label} (t-value)", t_value, suffix=suffix)
+    
+    # Calculate correction factor for parameter uncertainty
+    correction_factor = math.sqrt(1 + 1/sample_size)
+    log(f"{label} (correction factor)", correction_factor, suffix=suffix)
+    
+    # Calculate optimal order quantity with correction
+    optimal_q = sample_mean + t_value * sample_std * correction_factor
+    log(label, optimal_q, unit="units", suffix=suffix)
+    
+    # Compare with standard normal solution
+    standard_q = newsvendor_normal(sample_mean, sample_std, CR, label=f"{label} (without correction)", suffix=suffix)
+    
+    # Calculate difference
+    difference = optimal_q - standard_q
+    percent_difference = (difference / standard_q) * 100 if standard_q != 0 else 0
+    
+    log(f"{label} (absolute difference)", difference, unit="units", suffix=suffix)
+    log(f"{label} (percentage difference)", percent_difference, unit="%", suffix=suffix)
+    
+    return optimal_q
 
 
 def newsvendor_uniform(loc, scale, beta, label="Newsvendor uniform", suffix=""):
@@ -1505,6 +1719,104 @@ def calculate_fill_rate(z, Q, sigma_L, label="Fill rate", suffix=""):
     return fill_rate
 
 
+def calculate_adjusted_fill_rate(mean_demand, std_demand, order_up_to_level, lead_time, review_period=0, 
+                               label="Adjusted fill rate (γ)", suffix=""):
+    """
+    Calculate adjusted fill rate (γ-Service-level) for (R,S) policy
+    
+    Parameters:
+        mean_demand: Mean demand per period
+        std_demand: Standard deviation of demand per period
+        order_up_to_level: Order-up-to level (S)
+        lead_time: Lead time
+        review_period: Review period (R)
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Adjusted fill rate (γ)
+    """
+    log("Mean demand", mean_demand, suffix=suffix)
+    log("Std deviation", std_demand, suffix=suffix)
+    log("Order-up-to level (S)", order_up_to_level, suffix=suffix)
+    log("Lead time (L)", lead_time, suffix=suffix)
+    log("Review period (R)", review_period, suffix=suffix)
+    
+    # Calculate parameters
+    mean_demand_lead_review = mean_demand * (lead_time + review_period)
+    std_demand_lead_review = std_demand * math.sqrt(lead_time + review_period)
+    
+    log("Mean demand during L+R", mean_demand_lead_review, suffix=suffix)
+    log("Std dev during L+R", std_demand_lead_review, suffix=suffix)
+    
+    # Calculate safety factor
+    z = (order_up_to_level - mean_demand_lead_review) / std_demand_lead_review
+    log("Safety factor (z)", z, suffix=suffix)
+    
+    # Calculate expected shortage using loss function G(z)
+    g_z = G_z(z, label=f"{label} (loss function)", suffix=suffix)
+    expected_shortage = std_demand_lead_review * g_z
+    log("Expected shortage", expected_shortage, suffix=suffix)
+    
+    # Calculate adjusted fill rate
+    adjusted_fill_rate = 1 - (expected_shortage / mean_demand)
+    log(label, adjusted_fill_rate, suffix=suffix)
+    
+    return adjusted_fill_rate
+
+
+def base_stock_level_stochastic_lead_time(mean_demand, std_demand, mean_lead_time, std_lead_time, 
+                                        review_period, service_level, label="Base stock level", suffix=""):
+    """
+    Calculate base stock level (S) for (R,S) policy with stochastic lead time
+    
+    Parameters:
+        mean_demand: Mean demand per period
+        std_demand: Standard deviation of demand per period
+        mean_lead_time: Mean lead time
+        std_lead_time: Standard deviation of lead time
+        review_period: Review period (R)
+        service_level: Target service level (non-stockout probability)
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Base stock level (S)
+    """
+    log("Mean demand", mean_demand, suffix=suffix)
+    log("Std demand", std_demand, suffix=suffix)
+    log("Mean lead time", mean_lead_time, suffix=suffix)
+    log("Std lead time", std_lead_time, suffix=suffix)
+    log("Review period", review_period, suffix=suffix)
+    log("Service level", service_level, suffix=suffix)
+    
+    # Calculate safety factor for service level
+    z = inverse_cdf(service_level, label=f"{label} (safety factor)", suffix=suffix)
+    
+    # Calculate mean demand during lead time + review period
+    mean_demand_total = mean_demand * (mean_lead_time + review_period)
+    log(f"{label} (mean demand during L+R)", mean_demand_total, suffix=suffix)
+    
+    # Calculate variance considering both demand and lead time uncertainty
+    # variance = (L+R) * σ²ᴅ + μ²ᴅ * σ²ʟ
+    variance_demand_term = (mean_lead_time + review_period) * (std_demand ** 2)
+    variance_lead_term = (mean_demand ** 2) * (std_lead_time ** 2)
+    total_variance = variance_demand_term + variance_lead_term
+    
+    log(f"{label} (variance from demand)", variance_demand_term, suffix=suffix)
+    log(f"{label} (variance from lead time)", variance_lead_term, suffix=suffix)
+    log(f"{label} (total variance)", total_variance, suffix=suffix)
+    
+    std_total = math.sqrt(total_variance)
+    log(f"{label} (total std dev)", std_total, suffix=suffix)
+    
+    # Calculate base stock level
+    base_stock = mean_demand_total + z * std_total
+    log(label, base_stock, unit="units", suffix=suffix)
+    
+    return base_stock
+
+
 def order_up_to_level(forecast, safety_stock, label="Order-up-to level", suffix=""):
     """
     Order-up-to level (S)
@@ -1731,31 +2043,6 @@ def joint_optimization_s_Q(D, A, h, p, mu_L, sigma_L, label="Joint optimization 
         "expected_shortage": expected_shortage,
         "total_cost": total_cost
     }
-
-
-def calculate_fill_rate(z, Q, sigma_L, label="Fill rate", suffix=""):
-    """
-    Calculate fill rate (beta) for a given z-value and order quantity
-    
-    Parameters:
-        z: Service level z-value
-        Q: Order quantity
-        sigma_L: Standard deviation of demand during lead time
-        label: Optional label for logging output
-        suffix: Optional suffix to differentiate scenarios
-        
-    Returns:
-        Fill rate (beta)
-    """
-    log("z-value", z, suffix=suffix)
-    log("Order quantity", Q, unit="units", suffix=suffix)
-    log("Std dev lead time demand", sigma_L, suffix=suffix)
-    
-    g_z = G_z(z, label=f"{label} (loss function)", suffix=suffix)
-    fill_rate = 1 - (sigma_L * g_z / Q)
-    log(label, fill_rate, suffix=suffix)
-    
-    return fill_rate
 
 
 def discrete_lead_time_demand(demands, probabilities, s, h, p, label="Discrete lead time demand", suffix=""):
@@ -4692,8 +4979,817 @@ def demand_price_regression(price, demand, label="Demand-price regression", suff
 
 
 #####################################################
+# Statistical Tests
+#####################################################
+
+
+def chi_squared_test(observed, expected, alpha=0.05, label="Chi-squared test", suffix=""):
+    """
+    Perform Chi-squared goodness of fit test
+    
+    Parameters:
+        observed: Observed frequencies
+        expected: Expected frequencies
+        alpha: Significance level (default: 0.05)
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with test statistics and results
+    """
+    from scipy.stats import chi2
+    
+    log("Observed values", observed, suffix=suffix)
+    log("Expected values", expected, suffix=suffix)
+    log("Significance level", alpha, suffix=suffix)
+    
+    # Calculate chi-squared statistic
+    chi_sq = sum((n_j - s_j)**2 / s_j for n_j, s_j in zip(observed, expected) if s_j > 0)
+    log(f"{label} (statistic)", chi_sq, suffix=suffix)
+    
+    # Degrees of freedom (k-s-1)
+    # k = number of categories, s = number of parameters estimated (typically 1)
+    # Default is for 1 parameter estimated (s=1)
+    df = len(observed) - 1 - 1
+    log(f"{label} (degrees of freedom)", df, suffix=suffix)
+    
+    # Critical value
+    critical_value = chi2.ppf(1 - alpha, df)
+    log(f"{label} (critical value)", critical_value, suffix=suffix)
+    
+    # p-value
+    p_value = 1 - chi2.cdf(chi_sq, df)
+    log(f"{label} (p-value)", p_value, suffix=suffix)
+    
+    # Test result
+    reject_h0 = p_value < alpha
+    log(f"{label} (reject H0)", "Yes" if reject_h0 else "No", suffix=suffix)
+    
+    result = {
+        "chi_squared": chi_sq,
+        "df": df,
+        "critical_value": critical_value,
+        "p_value": p_value,
+        "reject_h0": reject_h0,
+        "interpretation": "Reject H0: Data does not fit the expected distribution" if reject_h0 else
+                        "Fail to reject H0: Data fits the expected distribution"
+    }
+    
+    log(f"{label} (interpretation)", result["interpretation"], suffix=suffix)
+    
+    return result
+
+
+#####################################################
+# Demand Modeling and Forecasting Functions
+#####################################################
+
+
+def constant_model(data, label="Constant model", suffix=""):
+    """
+    Fit a constant model (y_t = a + ε_t) to time series data
+    
+    Parameters:
+        data: Time series data
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with model parameters and forecasts
+    """
+    log("Data length", len(data), suffix=suffix)
+    
+    # Fit constant model (simple mean)
+    constant = np.mean(data)
+    log(f"{label} (constant)", constant, suffix=suffix)
+    
+    # Calculate forecasts (same value for all periods)
+    forecasts = np.full_like(data, constant, dtype=float)
+    
+    # Calculate errors
+    errors = np.array(data) - forecasts
+    
+    # Calculate performance metrics
+    mae = np.mean(np.abs(errors))
+    mse = np.mean(errors**2)
+    rmse = np.sqrt(mse)
+    
+    log(f"{label} (MAE)", mae, suffix=suffix)
+    log(f"{label} (MSE)", mse, suffix=suffix)
+    log(f"{label} (RMSE)", rmse, suffix=suffix)
+    
+    return {
+        "constant": constant,
+        "forecasts": forecasts,
+        "errors": errors,
+        "mae": mae,
+        "mse": mse,
+        "rmse": rmse
+    }
+
+
+def winters_method(data, season_length, alpha=0.2, beta=0.1, gamma=0.1, num_seasons=3, 
+                 label="Winters method", suffix=""):
+    """
+    Winter's triple exponential smoothing method for seasonality with trend
+    
+    Parameters:
+        data: Historical time series data
+        season_length: Length of seasonal cycle
+        alpha: Level smoothing parameter (0-1)
+        beta: Trend smoothing parameter (0-1)
+        gamma: Seasonal smoothing parameter (0-1)
+        num_seasons: Number of seasons to forecast
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with model components and forecasts
+    """
+    log("Data length", len(data), suffix=suffix)
+    log("Season length", season_length, suffix=suffix)
+    log("Alpha (level)", alpha, suffix=suffix)
+    log("Beta (trend)", beta, suffix=suffix)
+    log("Gamma (season)", gamma, suffix=suffix)
+    
+    data = np.array(data)
+    n = len(data)
+    
+    # Initialize level, trend, and seasonal components
+    level = np.zeros(n)
+    trend = np.zeros(n)
+    season = np.zeros(n)
+    fitted = np.zeros(n)
+    
+    # Initialize seasonal indices
+    season_averages = np.zeros(season_length)
+    
+    # Calculate initial seasonal indices
+    for i in range(season_length):
+        indices = range(i, n, season_length)
+        if len(indices) > 0:
+            season_averages[i] = np.mean(data[indices])
+    
+    global_average = np.mean(season_averages)
+    
+    for i in range(season_length):
+        season[i] = season_averages[i] / global_average if global_average != 0 else 1.0
+    
+    # Initialize level and trend
+    level[0] = data[0] / season[0] if season[0] != 0 else data[0]
+    trend[0] = 0  # Start with no trend
+    
+    # Apply Winter's method
+    for t in range(1, n):
+        # Calculate indices considering seasonality
+        season_idx = t % season_length
+        
+        if t < season_length:
+            level[t] = alpha * (data[t] / season[season_idx]) + (1 - alpha) * (level[t-1] + trend[t-1])
+            trend[t] = beta * (level[t] - level[t-1]) + (1 - beta) * trend[t-1]
+            season[season_idx] = gamma * (data[t] / level[t]) + (1 - gamma) * season[season_idx]
+        else:
+            level[t] = alpha * (data[t] / season[season_idx]) + (1 - alpha) * (level[t-1] + trend[t-1])
+            trend[t] = beta * (level[t] - level[t-1]) + (1 - beta) * trend[t-1]
+            season[season_idx] = gamma * (data[t] / level[t]) + (1 - gamma) * season[season_idx]
+        
+        # Calculate fitted values
+        fitted[t] = (level[t-1] + trend[t-1]) * season[season_idx]
+    
+    # Generate forecasts for future periods
+    forecasts = []
+    for i in range(1, num_seasons * season_length + 1):
+        forecast_level = level[-1] + i * trend[-1]
+        forecast_season = season[(n + i - 1) % season_length]
+        forecast = forecast_level * forecast_season
+        forecasts.append(forecast)
+    
+    # Normalize seasonal components
+    season_sum = np.sum(season[-season_length:])
+    normalized_season = season * season_length / season_sum if season_sum != 0 else season
+    
+    # Calculate errors
+    errors = data[1:] - fitted[1:]  # Skip first value which has no forecast
+    mae = np.mean(np.abs(errors))
+    mse = np.mean(errors**2)
+    rmse = np.sqrt(mse)
+    
+    log(f"{label} (final level)", level[-1], suffix=suffix)
+    log(f"{label} (final trend)", trend[-1], suffix=suffix)
+    log(f"{label} (seasonal factors)", normalized_season[-season_length:], suffix=suffix)
+    log(f"{label} (MAE)", mae, suffix=suffix)
+    log(f"{label} (RMSE)", rmse, suffix=suffix)
+    log(f"{label} (forecasts)", forecasts, suffix=suffix)
+    
+    return {
+        "level": level,
+        "trend": trend,
+        "season": normalized_season,
+        "fitted": fitted,
+        "forecasts": forecasts,
+        "errors": errors,
+        "mae": mae,
+        "mse": mse,
+        "rmse": rmse
+    }
+
+
+def croston_sba(demand, alpha=0.1, beta=0.1, label="Croston SBA", suffix=""):
+    """
+    Croston's method with Syntetos-Boylan Approximation (SBA) for intermittent demand
+    
+    Parameters:
+        demand: Historical demand time series
+        alpha: Smoothing parameter for demand size (0-1)
+        beta: Smoothing parameter for intervals (0-1)
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with forecasts and components
+    """
+    log("Data length", len(demand), suffix=suffix)
+    log("Alpha (demand size)", alpha, suffix=suffix)
+    log("Beta (intervals)", beta, suffix=suffix)
+    
+    demand = np.array(demand)
+    n = len(demand)
+    
+    # Initialize variables
+    z = np.zeros(n)      # Smoothed demand size
+    x = np.zeros(n)      # Smoothed interval
+    forecast = np.zeros(n)  # Croston's forecast
+    forecast_sba = np.zeros(n)  # SBA forecast
+    last_demand_period = 0
+    
+    # Find the first non-zero demand
+    first_nonzero = np.nonzero(demand)[0]
+    if len(first_nonzero) == 0:
+        log(f"{label} (warning)", "No non-zero demands found", suffix=suffix)
+        return {
+            "croston_forecasts": forecast,
+            "sba_forecasts": forecast_sba,
+            "demand_size": z,
+            "intervals": x
+        }
+    
+    first_nonzero = first_nonzero[0]
+    
+    # Initialize with first non-zero demand
+    z[first_nonzero] = demand[first_nonzero]
+    x[first_nonzero] = 1  # First interval
+    last_demand_period = first_nonzero
+    
+    # Apply Croston's method
+    for t in range(first_nonzero + 1, n):
+        if demand[t] > 0:
+            # Update interval
+            interval = t - last_demand_period
+            x[t] = beta * interval + (1 - beta) * x[last_demand_period]
+            
+            # Update demand size
+            z[t] = alpha * demand[t] + (1 - alpha) * z[last_demand_period]
+            
+            last_demand_period = t
+        else:
+            # Carry forward previous estimates
+            z[t] = z[last_demand_period]
+            x[t] = x[last_demand_period]
+        
+        # Standard Croston forecast
+        if x[t] > 0:
+            forecast[t] = z[t] / x[t]
+        
+        # Syntetos-Boylan Approximation (SBA)
+        if x[t] > 0:
+            forecast_sba[t] = (1 - beta/2) * z[t] / x[t]
+    
+    # Calculate errors (only for periods with actual demand)
+    demand_periods = demand > 0
+    errors_croston = demand[demand_periods] - forecast[demand_periods]
+    errors_sba = demand[demand_periods] - forecast_sba[demand_periods]
+    
+    # Calculate performance metrics
+    mae_croston = np.mean(np.abs(errors_croston))
+    mse_croston = np.mean(errors_croston**2)
+    rmse_croston = np.sqrt(mse_croston)
+    
+    mae_sba = np.mean(np.abs(errors_sba))
+    mse_sba = np.mean(errors_sba**2)
+    rmse_sba = np.sqrt(mse_sba)
+    
+    log(f"{label} (Croston MAE)", mae_croston, suffix=suffix)
+    log(f"{label} (Croston RMSE)", rmse_croston, suffix=suffix)
+    log(f"{label} (SBA MAE)", mae_sba, suffix=suffix)
+    log(f"{label} (SBA RMSE)", rmse_sba, suffix=suffix)
+    
+    return {
+        "croston_forecasts": forecast,
+        "sba_forecasts": forecast_sba,
+        "demand_size": z,
+        "intervals": x,
+        "mae_croston": mae_croston,
+        "mse_croston": mse_croston,
+        "rmse_croston": rmse_croston,
+        "mae_sba": mae_sba,
+        "mse_sba": mse_sba,
+        "rmse_sba": rmse_sba
+    }
+
+
+#####################################################
+# Warehouse Scheduling and Multi-Item Inventory Models
+#####################################################
+
+
+def warehouse_scheduling_dedicated_capacity(demands, setup_costs, holding_costs, item_sizes, warehouse_capacity, 
+                                          label="Warehouse scheduling (dedicated)", suffix=""):
+    """
+    Solve the warehouse scheduling problem with dedicated capacity constraint
+    
+    min ∑(h_i * d_i/Q_i * A_i + h_i/2 * Q_i)
+    s.t. ∑(a_i * Q_i) ≤ W
+         Q_i ≥ 0 for i = 1, 2, ..., N
+    
+    Parameters:
+        demands: List of demand rates
+        setup_costs: List of setup costs
+        holding_costs: List of holding costs
+        item_sizes: List of item sizes (a_i)
+        warehouse_capacity: Total warehouse capacity (W)
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with optimal order quantities and costs
+    """
+    n = len(demands)
+    log("Number of items", n, suffix=suffix)
+    log("Demands", demands, suffix=suffix)
+    log("Setup costs", setup_costs, suffix=suffix)
+    log("Holding costs", holding_costs, suffix=suffix)
+    log("Item sizes", item_sizes, suffix=suffix)
+    log("Warehouse capacity", warehouse_capacity, suffix=suffix)
+    
+    # Calculate EOQ values (unconstrained)
+    unconstrained_Q = [eoq(demands[i], setup_costs[i], holding_costs[i], 
+                          label=f"{label} (EOQ {i+1})", suffix=suffix) for i in range(n)]
+    
+    # Check if capacity constraint is active
+    total_space = sum(item_sizes[i] * unconstrained_Q[i] for i in range(n))
+    log(f"{label} (total space required)", total_space, suffix=suffix)
+    
+    if total_space <= warehouse_capacity:
+        log(f"{label} (constraint)", "Inactive - using EOQ values", suffix=suffix)
+        total_cost = sum(
+            demands[i] * setup_costs[i] / unconstrained_Q[i] + holding_costs[i] * unconstrained_Q[i] / 2
+            for i in range(n)
+        )
+        log(f"{label} (total cost)", total_cost, suffix=suffix)
+        
+        return {
+            "order_quantities": unconstrained_Q,
+            "total_cost": total_cost,
+            "lambda": 0,  # Lagrange multiplier
+            "constrained": False
+        }
+    
+    # If constrained, solve using Lagrangian approach
+    log(f"{label} (constraint)", "Active - using Lagrangian approach", suffix=suffix)
+    
+    # Define function to find lambda
+    def capacity_equation(lambda_val):
+        if lambda_val <= 0:
+            return float('inf')  # Force positive lambda
+        
+        Q_vals = [
+            math.sqrt(2 * demands[i] * setup_costs[i] / (holding_costs[i] + 2 * lambda_val * item_sizes[i]))
+            for i in range(n)
+        ]
+        
+        return sum(item_sizes[i] * Q_vals[i] for i in range(n)) - warehouse_capacity
+    
+    # Find lambda that satisfies capacity constraint
+    lambda_bounds = [1e-10, 1000]  # Bounds for lambda
+    
+    # Test a range of lambda values to ensure we have proper bounds
+    while capacity_equation(lambda_bounds[1]) > 0:
+        lambda_bounds[1] *= 10
+    
+    # Use brentq for root finding (more robust than fsolve for this problem)
+    try:
+        lambda_val = brentq(capacity_equation, lambda_bounds[0], lambda_bounds[1])
+        log(f"{label} (lambda)", lambda_val, suffix=suffix)
+        
+        # Calculate optimal Q values using lambda
+        constrained_Q = [
+            math.sqrt(2 * demands[i] * setup_costs[i] / (holding_costs[i] + 2 * lambda_val * item_sizes[i]))
+            for i in range(n)
+        ]
+        
+        # Verify capacity constraint
+        total_space_used = sum(item_sizes[i] * constrained_Q[i] for i in range(n))
+        log(f"{label} (total space used)", total_space_used, suffix=suffix)
+        
+        # Calculate total cost
+        total_cost = sum(
+            demands[i] * setup_costs[i] / constrained_Q[i] + holding_costs[i] * constrained_Q[i] / 2
+            for i in range(n)
+        )
+        log(f"{label} (total cost)", total_cost, suffix=suffix)
+        
+        # Log individual order quantities
+        for i in range(n):
+            log(f"{label} (Q_{i+1})", constrained_Q[i], suffix=suffix)
+            
+        return {
+            "order_quantities": constrained_Q,
+            "total_cost": total_cost,
+            "lambda": lambda_val,
+            "constrained": True
+        }
+        
+    except Exception as e:
+        log(f"{label} (error)", str(e), suffix=suffix)
+        return {
+            "error": str(e),
+            "order_quantities": unconstrained_Q,  # Return unconstrained as fallback
+            "total_cost": None,
+            "lambda": None,
+            "constrained": True
+        }
+
+
+def warehouse_scheduling_average_utilization(demands, setup_costs, holding_costs, item_sizes, warehouse_capacity, 
+                                           label="Warehouse scheduling (avg utilization)", suffix=""):
+    """
+    Solve the warehouse scheduling problem with average utilization constraint
+    
+    min ∑(h_i * d_i/Q_i * A_i + h_i/2 * Q_i)
+    s.t. ∑(0.5 * a_i * Q_i) ≤ W
+         Q_i ≥ 0 for i = 1, 2, ..., N
+    
+    Parameters:
+        demands: List of demand rates
+        setup_costs: List of setup costs
+        holding_costs: List of holding costs
+        item_sizes: List of item sizes (a_i)
+        warehouse_capacity: Total warehouse capacity (W)
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with optimal order quantities and costs
+    """
+    n = len(demands)
+    log("Number of items", n, suffix=suffix)
+    log("Demands", demands, suffix=suffix)
+    log("Setup costs", setup_costs, suffix=suffix)
+    log("Holding costs", holding_costs, suffix=suffix)
+    log("Item sizes", item_sizes, suffix=suffix)
+    log("Warehouse capacity", warehouse_capacity, suffix=suffix)
+    
+    # Calculate EOQ values (unconstrained)
+    unconstrained_Q = [eoq(demands[i], setup_costs[i], holding_costs[i], 
+                          label=f"{label} (EOQ {i+1})", suffix=suffix) for i in range(n)]
+    
+    # Check if capacity constraint is active (using average utilization = 0.5 * a_i * Q_i)
+    total_space = sum(0.5 * item_sizes[i] * unconstrained_Q[i] for i in range(n))
+    log(f"{label} (total average space required)", total_space, suffix=suffix)
+    
+    if total_space <= warehouse_capacity:
+        log(f"{label} (constraint)", "Inactive - using EOQ values", suffix=suffix)
+        total_cost = sum(
+            demands[i] * setup_costs[i] / unconstrained_Q[i] + holding_costs[i] * unconstrained_Q[i] / 2
+            for i in range(n)
+        )
+        log(f"{label} (total cost)", total_cost, suffix=suffix)
+        
+        return {
+            "order_quantities": unconstrained_Q,
+            "total_cost": total_cost,
+            "lambda": 0,  # Lagrange multiplier
+            "constrained": False
+        }
+    
+    # If constrained, solve using Lagrangian approach
+    log(f"{label} (constraint)", "Active - using Lagrangian approach", suffix=suffix)
+    
+    # Define function to find lambda
+    def capacity_equation(lambda_val):
+        if lambda_val <= 0:
+            return float('inf')  # Force positive lambda
+        
+        Q_vals = [
+            math.sqrt(2 * demands[i] * setup_costs[i] / (holding_costs[i] + lambda_val * item_sizes[i]))
+            for i in range(n)
+        ]
+        
+        return sum(0.5 * item_sizes[i] * Q_vals[i] for i in range(n)) - warehouse_capacity
+    
+    # Find lambda that satisfies capacity constraint
+    lambda_bounds = [1e-10, 1000]  # Bounds for lambda
+    
+    # Test a range of lambda values to ensure we have proper bounds
+    while capacity_equation(lambda_bounds[1]) > 0:
+        lambda_bounds[1] *= 10
+    
+    # Use brentq for root finding (more robust than fsolve for this problem)
+    try:
+        lambda_val = brentq(capacity_equation, lambda_bounds[0], lambda_bounds[1])
+        log(f"{label} (lambda)", lambda_val, suffix=suffix)
+        
+        # Calculate optimal Q values using lambda
+        constrained_Q = [
+            math.sqrt(2 * demands[i] * setup_costs[i] / (holding_costs[i] + lambda_val * item_sizes[i]))
+            for i in range(n)
+        ]
+        
+        # Verify capacity constraint
+        total_space_used = sum(0.5 * item_sizes[i] * constrained_Q[i] for i in range(n))
+        log(f"{label} (total average space used)", total_space_used, suffix=suffix)
+        
+        # Calculate total cost
+        total_cost = sum(
+            demands[i] * setup_costs[i] / constrained_Q[i] + holding_costs[i] * constrained_Q[i] / 2
+            for i in range(n)
+        )
+        log(f"{label} (total cost)", total_cost, suffix=suffix)
+        
+        # Log individual order quantities
+        for i in range(n):
+            log(f"{label} (Q_{i+1})", constrained_Q[i], suffix=suffix)
+            
+        return {
+            "order_quantities": constrained_Q,
+            "total_cost": total_cost,
+            "lambda": lambda_val,
+            "constrained": True
+        }
+        
+    except Exception as e:
+        log(f"{label} (error)", str(e), suffix=suffix)
+        return {
+            "error": str(e),
+            "order_quantities": unconstrained_Q,  # Return unconstrained as fallback
+            "total_cost": None,
+            "lambda": None,
+            "constrained": True
+        }
+
+
+def rotation_common_cycle_with_capacity(demands, setup_costs, holding_costs, item_sizes, warehouse_capacity, 
+                                       label="Rotation common cycle", suffix=""):
+    """
+    Solve the rotation common cycle problem with capacity constraints
+    
+    Parameters:
+        demands: List of demand rates (d_i)
+        setup_costs: List of setup costs (A_i)
+        holding_costs: List of holding costs (h_i)
+        item_sizes: List of item sizes (a_i)
+        warehouse_capacity: Total warehouse capacity (W)
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with optimal cycle time, order quantities, and costs
+    """
+    n = len(demands)
+    log("Number of items", n, suffix=suffix)
+    log("Demands", demands, suffix=suffix)
+    log("Setup costs", setup_costs, suffix=suffix)
+    log("Holding costs", holding_costs, suffix=suffix)
+    log("Item sizes", item_sizes, suffix=suffix)
+    log("Warehouse capacity", warehouse_capacity, suffix=suffix)
+    
+    # Calculate capacity balance times (t_i)
+    sum_ad = sum(item_sizes[i] * demands[i] for i in range(n))
+    log(f"{label} (sum a_i * d_i)", sum_ad, suffix=suffix)
+    
+    t_values = [0]  # t_0 = 0
+    for i in range(1, n+1):
+        sum_partial = sum(item_sizes[j] * demands[j] for j in range(i))
+        t_i = sum_partial / sum_ad
+        t_values.append(t_i)
+        log(f"{label} (t_{i})", t_i, suffix=suffix)
+    
+    # Calculate capacity requirement term
+    cap_term = 0
+    for i in range(n):
+        for j in range(i+1):
+            cap_term += item_sizes[i] * item_sizes[j] * demands[i] * demands[j]
+    
+    cap_term = cap_term / sum_ad
+    log(f"{label} (capacity term)", cap_term, suffix=suffix)
+    
+    # Calculate unconstrained optimal cycle time
+    cost_sum_A = sum(setup_costs)
+    log(f"{label} (sum A_i)", cost_sum_A, suffix=suffix)
+    
+    cost_sum_hd = sum(holding_costs[i] * demands[i] for i in range(n))
+    log(f"{label} (sum h_i * d_i)", cost_sum_hd, suffix=suffix)
+    
+    T_unconstrained = math.sqrt(2 * cost_sum_A / cost_sum_hd)
+    log(f"{label} (unconstrained T*)", T_unconstrained, suffix=suffix)
+    
+    # Calculate capacity constrained cycle time
+    T_constrained = warehouse_capacity * sum_ad / cap_term
+    log(f"{label} (capacity constrained T*)", T_constrained, suffix=suffix)
+    
+    # Choose the minimum (binding constraint)
+    T_optimal = min(T_unconstrained, T_constrained)
+    log(f"{label} (optimal T*)", T_optimal, suffix=suffix)
+    
+    is_capacity_binding = (T_optimal == T_constrained)
+    log(f"{label} (capacity binding?)", "Yes" if is_capacity_binding else "No", suffix=suffix)
+    
+    # Calculate optimal order quantities and costs
+    Q_optimal = [demands[i] * T_optimal for i in range(n)]
+    
+    # Calculate total cost
+    total_cost = sum(setup_costs) / T_optimal + T_optimal * sum(holding_costs[i] * demands[i] for i in range(n)) / 2
+    log(f"{label} (total cost)", total_cost, suffix=suffix)
+    
+    # Log individual order quantities
+    for i in range(n):
+        log(f"{label} (Q_{i+1})", Q_optimal[i], suffix=suffix)
+        
+    # Calculate peak inventory and verify capacity constraint
+    peak_inventory = 0
+    for i in range(n):
+        item_peak = Q_optimal[i] - demands[i] * (T_optimal - t_values[i])
+        peak_inventory += item_sizes[i] * item_peak
+        
+    log(f"{label} (peak inventory space)", peak_inventory, suffix=suffix)
+    log(f"{label} (capacity constraint satisfied?)", "Yes" if peak_inventory <= warehouse_capacity else "No", suffix=suffix)
+    
+    return {
+        "cycle_time": T_optimal,
+        "order_quantities": Q_optimal,
+        "total_cost": total_cost,
+        "capacity_binding": is_capacity_binding,
+        "capacity_requirement": peak_inventory,
+        "time_points": t_values
+    }
+
+
+#####################################################
 # Heuristic Models
 #####################################################
+
+def average_cost_s_q_policy(D, A, h, p, Q, z, sigma_L, stockout_type="occasion", label="Average cost (s,Q)", suffix=""):
+    """
+    Calculate average cost for (s,Q) policy with normally distributed demand
+    
+    Parameters:
+        D: Annual demand rate
+        A: Setup cost
+        h: Holding cost per unit per year
+        p: Penalty cost (per stockout occasion or per unit short)
+        Q: Order quantity
+        z: Safety factor
+        sigma_L: Standard deviation of demand during lead time
+        stockout_type: Type of stockout cost - "occasion" or "unit"
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Average cost
+    """
+    log("Annual demand", D, suffix=suffix)
+    log("Setup cost", A, suffix=suffix)
+    log("Holding cost", h, suffix=suffix)
+    log("Penalty cost", p, suffix=suffix)
+    log("Order quantity", Q, suffix=suffix)
+    log("Safety factor (z)", z, suffix=suffix)
+    log("Std dev lead time demand", sigma_L, suffix=suffix)
+    log("Stockout type", stockout_type, suffix=suffix)
+    
+    # Calculate ordering cost
+    ordering_cost = (D / Q) * A
+    log(f"{label} (ordering cost)", ordering_cost, suffix=suffix)
+    
+    # Calculate holding cost (includes cycle stock and safety stock)
+    holding_cost_value = h * (Q/2 + z * sigma_L)
+    log(f"{label} (holding cost)", holding_cost_value, suffix=suffix)
+    
+    # Calculate stockout cost
+    if stockout_type == "occasion":
+        # Penalty cost per stockout occasion
+        phi_z = phi_z(z, label="", suffix="")
+        stockout_prob = 1 - Phi_z(z, label="", suffix="")
+        stockout_cost = (D/Q) * p * stockout_prob
+        log(f"{label} (stockout probability)", stockout_prob, suffix=suffix)
+    else:
+        # Penalty cost per unit short
+        g_z = G_z(z, label="", suffix="")
+        stockout_cost = (D/Q) * p * sigma_L * g_z
+        log(f"{label} (expected shortage)", sigma_L * g_z, suffix=suffix)
+    
+    log(f"{label} (stockout cost)", stockout_cost, suffix=suffix)
+    
+    # Calculate total average cost
+    average_cost = ordering_cost + holding_cost_value + stockout_cost
+    log(label, average_cost, suffix=suffix)
+    
+    return average_cost
+
+
+def joint_optimization_s_q_algorithm(D, A, h, p, mu_L, sigma_L, max_iterations=10, 
+                                   stockout_type="occasion", label="Joint optimization", suffix=""):
+    """
+    Joint optimization algorithm for (s,Q) policy
+    
+    Parameters:
+        D: Annual demand
+        A: Setup cost
+        h: Holding cost per unit per year
+        p: Penalty/stockout cost
+        mu_L: Mean demand during lead time
+        sigma_L: Standard deviation of demand during lead time
+        max_iterations: Maximum number of iterations
+        stockout_type: Type of stockout cost - "occasion" or "unit"
+        label: Optional label for logging output
+        suffix: Optional suffix to differentiate scenarios
+        
+    Returns:
+        Dictionary with optimal s, Q and cost
+    """
+    log("Annual demand", D, suffix=suffix)
+    log("Setup cost", A, suffix=suffix)
+    log("Holding cost", h, suffix=suffix)
+    log("Penalty cost", p, suffix=suffix)
+    log("Mean lead time demand", mu_L, suffix=suffix)
+    log("Std dev lead time demand", sigma_L, suffix=suffix)
+    log("Stockout type", stockout_type, suffix=suffix)
+    
+    # Initialize with EOQ
+    Q = eoq(D, A, h, label=f"{label} (initial Q)", suffix=suffix)
+    
+    for i in range(max_iterations):
+        log(f"{label} (iteration {i+1})", "", suffix=suffix)
+        
+        # Step 1: Determine z(Q)
+        if stockout_type == "occasion":
+            # Formula for penalty cost per stockout occasion
+            term = D * p / (math.sqrt(2 * math.pi) * Q * h * sigma_L)
+            log(f"{label} (term)", term, suffix=suffix)
+            
+            if term >= 1:
+                z = math.sqrt(2 * math.log(term))
+                log(f"{label} (z value)", z, suffix=suffix)
+            else:
+                z = 0
+                log(f"{label} (z value - term < 1)", z, suffix=suffix)
+                
+        else:
+            # Formula for penalty cost per unit short
+            term = h * Q / (p * D)
+            log(f"{label} (term)", term, suffix=suffix)
+            
+            if term < 1:
+                z = inverse_cdf(1 - term, label=f"{label} (z value)", suffix=suffix)
+            else:
+                z = 0
+                log(f"{label} (z value - term ≥ 1)", z, suffix=suffix)
+        
+        # Step 2: Determine Q(z)
+        if stockout_type == "occasion":
+            stockout_prob = 1 - Phi_z(z, label="", suffix="")
+            Q_new = math.sqrt(2 * D * (A + p * stockout_prob) / h)
+        else:
+            g_z = G_z(z, label="", suffix="")
+            Q_new = math.sqrt(2 * D * (A + p * sigma_L * g_z) / h)
+        
+        log(f"{label} (updated Q)", Q_new, suffix=suffix)
+        
+        # Check convergence
+        if abs(Q_new - Q) < 0.01 * Q:
+            log(f"{label} (converged)", "Yes", suffix=suffix)
+            Q = Q_new
+            break
+            
+        Q = Q_new
+    
+    # Calculate reorder point s
+    s = mu_L + z * sigma_L
+    log(f"{label} (reorder point s)", s, suffix=suffix)
+    
+    # Calculate cost
+    cost = average_cost_s_q_policy(D, A, h, p, Q, z, sigma_L, 
+                                 stockout_type=stockout_type, 
+                                 label=f"{label} (final cost)", 
+                                 suffix=suffix)
+    
+    return {
+        "order_quantity": Q,
+        "reorder_point": s,
+        "safety_factor": z,
+        "safety_stock": z * sigma_L,
+        "total_cost": cost
+    }
+
 
 def part_period_balancing(demands, setup_cost, holding_cost, label="Part Period Balancing", suffix=""):
     """
